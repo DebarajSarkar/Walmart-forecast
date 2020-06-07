@@ -111,3 +111,432 @@ for ii in range(1,df['Store'].max()):
 results=pd.DataFrame(models)        
 ------------------------------------------------------------------------------------------------------------
 results
+
+
+
+-------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+train=pd.read_csv("D:\\Walmart\\train.csv")
+features=pd.read_csv("D:\\Walmart\\features.csv")
+stores=pd.read_csv("D:\\Walmart\\stores.csv")
+test=pd.read_csv("D:\\Walmart\\test.csv")
+df=pd.merge(train,features,on=['Store' ,'Date'],how='left')
+df.head(1)
+
+-----------------------------------------------------------------------
+
+
+print("Data from date",df['Date'].min(),"till date",df['Date'].max(),"for maximum",df['Store'].max(),"stores and",df['Dept'].max(),"maximum depts")
+
+-----------------------------------------------------------------------
+
+df['Weekly_Sales'] = np.where(df.Weekly_Sales <0, 0, df.Weekly_Sales)
+df['MarkDown1']=df['MarkDown1'].fillna(0)
+df['MarkDown2']=df['MarkDown2'].fillna(0)
+df['MarkDown3']=df['MarkDown3'].fillna(0)
+df['MarkDown4']=df['MarkDown4'].fillna(0)
+df['MarkDown5']=df['MarkDown5'].fillna(0)
+df['IsHoliday_x']=pd.get_dummies(df['IsHoliday_x'])
+df=df.drop("IsHoliday_y",axis=1)
+df.rename(columns={'IsHoliday_x':'IsHoliday'},inplace=True)
+df.set_index("Date",inplace=True)
+df.head(1)
+
+-----------------------------------------------------------------------
+
+f=df.groupby(['Store'])['Dept'].nunique().reset_index().rename({"Dept":"UniqueDepts"})
+print(sum(f['Dept']),"total models to be built for",sum(f['Dept']),"Depts")
+print("there are around",df.shape[1]-3,"dependent variables")
+#print("We want ",sum(f['Dept'])*(df.shape[1]-3),"1 variable models")
+#print("We want ",sum(f['Dept'])*(df.shape[1]-3)*(df.shape[1]-4),"2 variable models")
+#print("We want ",sum(f['Dept'])*df.shape[1]*(df.shape[1]-1)*(df.shape[1]-2),"3 variable models")
+#print("We want ",sum(f['Dept'])*df.shape[1]*(df.shape[1]-1)*(df.shape[1]-2)*(df.shape[1]-3),"4 variable models")
+print("Stores have different umbers of departments as shown below..")
+f
+
+-----------------------------------------------------------------------
+
+df[(df['Store']==1)&(df['Dept']==1)]['Weekly_Sales'].min(),df[(df['Store']==2)&(df['Dept']==1)]['Weekly_Sales'].max()
+
+-----------------------------------------------------------------------
+
+#The below analysis shows that not the dept has sales accross the weeks for 2.6 years.
+#So there needs to be some sort of adjustment in the data before you fit in forecasting models for each department
+cmb=[]
+count=0
+for ii in range(1,df['Store'].max()+1):
+    for jj in range(1,df['Dept'].max()+1):
+        m=df[(df['Store']==ii)&(df['Dept']==jj)]['Weekly_Sales'].min()
+        n=df[(df['Store']==ii)&(df['Dept']==jj)]['Weekly_Sales'].max()
+        c=df[(df['Store']==ii)&(df['Dept']==jj)]['Weekly_Sales'].count()
+        h=pd.DataFrame(np.where(df[(df['Store']==ii)&(df['Dept']==jj)]['IsHoliday']==0)).shape[1]
+        count+=1
+        print(count,'Store',ii,'Dept',jj,'min_sales',m,'max_sales',n,'#ofweekssales',c,'#ofholidays',h)
+        cmb.append({'count':count,'Store':ii,'Dept':jj,'min_sales':m,'max_sales':n,'#ofweekssales':c})
+        
+result=pd.DataFrame(cmb)         
+
+------------------------------------------------------------------------
+
+#simple fixed models for all depts.All variables in the dataset has been considered simulteniously.
+
+import itertools
+import statsmodels.api as sm
+
+count=0
+models=[]
+#max_pvalue=[]
+k=2
+
+for ii in range(1,df['Store'].max()):
+    for jj in range(1,df['Dept'].max()):
+        try:
+            y=df[(df['Store']==ii)&(df['Dept']==jj)]['Weekly_Sales']
+            X=df[(df['Store']==ii)&(df['Dept']==jj)].drop(['Store','Dept','Weekly_Sales'],axis=1)
+            ols = sm.OLS(y,X).fit()
+            models.append(ols)
+            #print(count,'Store',ii,'Dept',jj,'min_sales',m,'max_sales',n,'#ofweekssales',c,'#ofholidays',h)
+        except:
+            continue
+results=pd.DataFrame(models)        
+
+-----------------------------------------------------------------------------
+
+import itertools
+import statsmodels.api as sm
+
+count=0
+models=[]
+maxvars=2
+
+for ii in range(1,df['Store'].max()+1):
+    for jj in range(1,df['Dept'].max()+1):
+        
+        y=df[(df['Store']==ii)&(df['Dept']==jj)]['Weekly_Sales']
+        X=df[(df['Store']==ii)&(df['Dept']==jj)].drop(['Store','Dept','Weekly_Sales'],axis=1)
+        count+=1
+        for mm in range(1,maxvars+1):
+            for combo in itertools.combinations(X.columns, mm):
+                try:
+                    ols = sm.OLS(y,X[list(combo)]).fit()
+                    maxpval= round(max(ols.pvalues.values),2)
+                    
+                    try:
+                        maxvif=np.linalg.inv(np.corrcoef(X[list(combo)], rowvar=False)).diagonal().max() 
+                    except:
+                        maxvif=np.nan
+                        
+                            
+                    #RSS = ((regr.predict(Xn[list(combo)]) - yn) ** 2).sum()
+                                        
+                    models.append({"Store":ii,
+                                   "Dept":jj,
+                                   "model#":count,
+                                   "modelsummary":ols,
+                                   "maxpval":maxpval,
+                                   "adjrsq":round(ols.rsquared_adj,2),
+                                   "vars":str(ols.params.index.tolist()),
+                                   "maxvif":maxvif                             
+                                  })
+                
+                except:
+                    continue
+        #count+=1                
+allmodels=pd.DataFrame(models)
+#allmodels.to_csv('output2.csv', index=False)
+#pd.DataFrame(models).to_pickle('D:\\Walmart\\allmodels.pkl')
+
+----------------------------------------------------------------------------------
+
+#allmodels.to_pickle('D:\\Walmart\\allmodels.pkl')
+allmodels=pd.read_pickle('D:\\Walmart\\allmodels.pkl')
+allmodels
+#allmodels.loc[50,"modelsummary"].params
+
+-----------------------------------------------------------------------------------
+
+sortedmodels=allmodels.sort_values(by=["Store","Dept","maxpval","adjrsq","maxvif"], ascending=[True,True,True,False,True])
+ds=sortedmodels.groupby(["Store","Dept"]).head(2)#select top 2 models and choose variables in those models
+ds['storedept']=ds['Store'].astype(str)+'_'+ds['Dept'].astype(str)
+ds
+
+-----------------------------------------------------------------------------------
+
+ff=ds.groupby(['storedept'])["vars"].apply(lambda x: ','.join(np.array(x))).reset_index()
+ff
+
+-----------------------------------------------------------------------------------
+
+from itertools import chain
+dx=[]
+for hh in range(0,ff.shape[0]):
+    x=eval(ff.loc[hh,"vars"])
+    ll=list(set(list(chain.from_iterable(x))))
+    dx.append({'model#':hh,'selectvars':ll})
+    
+jd=pd.DataFrame(dx)
+
+jd
+
+-----------------------------------------------------------------------------------
+
+tt=ff.join(jd)
+
+a=[]
+for ss in range(0,tt.shape[0]):
+    stor, dep = tt.loc[ss,'storedept'].split('_', 1)
+    a.append({'Store':stor,'Dept':dep})
+    
+dt=pd.DataFrame(a).join(tt).drop(['storedept','model#'],axis=1)
+dt
+
+----------------------------------------------------------------------------------
+
+dt['Store']=pd.to_numeric(dt['Store'], errors='coerce')
+dt['Dept']=pd.to_numeric(dt['Dept'], errors='coerce')
+total=pd.merge(df.reset_index(),dt,on=['Store','Dept'],how='left')
+#total=total.set_index('Date')
+total.to_pickle('D:\\Walmart\\total.pkl')
+total
+
+-----------------------------------------------------------------------------------
+total.loc[20,"selectvars"], total.loc[421565,"selectvars"]
+-----------------------------------------------------------------------------------
+
+total1=total.copy()
+rr=total1[(total1["Store"]==1)&(total1["Dept"]==1)]
+X=rr.loc[:,["Date"]+rr.loc[20,"selectvars"]].set_index("Date")
+y=rr.loc[:,["Date","Weekly_Sales"]].set_index("Date")
+X
+
+-----------------------------------------------------------------------------------
+
+for st in range(1,total['Store'].max()+1):
+    for dt in range(1,total['Dept'].max()+1):
+        try:
+            rr=total[(total["Store"]==st)&(total["Dept"]==dt)]
+            X=rr.loc[:,["Date"]+rr.loc[rr.index.min(),"selectvars"]].set_index("Date")
+            #X=rr.loc[:,["Date"]+rr.loc[rr.index.min(),"selectvars"]].set_index("Date")
+            print(st,dt,X.columns)
+        except:
+            continue
+
+----------------------------------------------------------------------------------
+
+import itertools
+p = range(0, 2)#AR order
+d = range(0, 1)#Difference
+q = range(0, 1)#MA order
+pdq = list(itertools.product(p, d, q))#arima order pdq combination generation
+seasonal_pdq = [(x[0], x[1], x[2], 24) for x in list(itertools.product(p, d, q))]#arima seasonal order pdq combination generation
+cnt=0
+for st in range(1,total['Store'].max()+1):
+    for dt in range(1,total['Dept'].max()+1):
+        try:
+            rr=total[(total["Store"]==st)&(total["Dept"]==dt)]
+            X=rr.loc[:,["Date"]+rr.loc[rr.index.min(),"selectvars"]].set_index("Date")
+            y=rr.loc[:,["Date","Weekly_Sales"]].set_index("Date")
+            for ik in range(1,5):# range(1,n) means 1 to n-1 variable combination models are considered
+                for combo in itertools.combinations(X.columns, ik):
+                    for numberarima,param in enumerate(pdq):
+                        for numberseas,param_seasonal in enumerate(seasonal_pdq):
+                            cnt=cnt+1
+                            print(cnt,st,dt,combo,numberarima,param,numberseas,param_seasonal)
+        except:
+            continue
+                
+
+
+----------------------------------------------------------------------------------------------------------
+
+
+import itertools
+import statsmodels.api as sm
+
+start_train = '2010-02-05'#training start date
+end_train   = '2012-10-26'#training end date
+
+count=0
+p = range(0, 2)#AR order
+d = range(0, 1)#Difference
+q = range(0, 1)#MA order
+
+variable=[]
+parameters=[]
+max_pvalue=[]
+rsquared=[]
+adjrsquared=[]
+aic=[]
+bic=[]
+rss=[]
+rslts=[]
+
+pdq = list(itertools.product(p, d, q))#arima order pdq combination generation
+seasonal_pdq = [(x[0], x[1], x[2], 24) for x in list(itertools.product(p, d, q))]#arima seasonal order pdq combination generation
+
+for ik in range(1,4):                 # range(1,n) means 1 to n-1 variable combination models are considered
+    for st in range(1,total['Store'].max()+1):
+        for dt in range(1,total['Dept'].max()+1):
+            try:
+                rr=total[(total["Store"]==st)&(total["Dept"]==dt)]
+                X=rr.loc[:,["Date"]+rr.loc[rr.index.min(),"selectvars"]].set_index("Date")
+                y=rr.loc[:,["Date","Weekly_Sales"]].set_index("Date")
+     
+                for combo in itertools.combinations(X.columns, ik):
+                    for numberarima,param in enumerate(pdq):
+                        for numberseas,param_seasonal in enumerate(seasonal_pdq):
+                            try:
+                                #y.index = pd.DatetimeIndex(y.index.values,freq=y.index.inferred_freq)
+                                X.index = pd.DatetimeIndex(X.index.values,freq='W-FRI')          
+                                results = sm.tsa.statespace.SARIMAX(y.values,
+                                            exog=X[pd.array(combo)],
+                                            order=param,
+                                            seasonal_order=param_seasonal,
+                                            enforce_stationarity=False,
+                                            enforce_invertibility=False).fit()
+                                #results.summary()
+                                #print(results)
+
+                                pred = results.get_prediction(start = pd.to_datetime(start_train),
+                                              end = pd.to_datetime(end_train),
+                                              exog=X[pd.array(combo)][start_train:end_train]
+                                             )
+
+                                y_forecasted = pred.predicted_mean.values
+                                y_truth = y[start_train:].values
+                                RSS = round((((y_forecasted - y_truth) ** 2).sum()),2)
+                    
+                                #RSS=((regr.predict(Xn[pd.array(combo)]) - yn) ** 2).sum()
+                                #pred.predicted_mean[1:].plot(figsize=(12, 8))                
+                               
+                                #print(count,combo,param,param_seasonal,rss,results.aic)
+                                count=count+1
+                                #print(results)
+                    
+                                rslts.append({"model":results, "rss":RSS})        
+                                variable.append(str(results.pvalues.index))
+                                parameters.append(results.params)
+                                max_pvalue.append(round(max(results.pvalues.values),2))
+                                #rsquared.append(round(results.rsquared,2))
+                                #adjrsquared.append(round(results.rsquared_adj,2))
+                                aic.append(round(results.aic,2))
+                                bic.append(round(results.bic,2))
+                                rss.append(RSS)
+                                #print(count,rss)
+                     
+                
+                            except:
+                                continue
+                    
+            
+            except:
+                continue
+                    
+models = pd.DataFrame(rslts)
+variable=pd.DataFrame(variable).rename(columns = {0:'variable'})
+coeff=pd.DataFrame(parameters)
+max_pvalue=pd.DataFrame(max_pvalue).rename(columns = {0:'max_pvalue'})
+#rsquared=pd.DataFrame(rsquared).rename(columns = {0:'rsquared'})
+#adjrsquared=pd.DataFrame(adjrsquared).rename(columns = {0:'adjrsquared'})
+aic=pd.DataFrame(aic).rename(columns = {0:'aic'})
+bic=pd.DataFrame(bic).rename(columns = {0:'bic'})
+rss=pd.DataFrame(rss).rename(columns = {0:'rss'})
+
+variable.join(coeff).join(max_pvalue).join(aic).join(bic).join(rss) 
+#models.loc[176,"model"].summary()
+
+
+--------------------------------------------------------------------------------------
+
+import itertools
+import statsmodels.api as sm
+
+start_train = '2010-02-05'#training start date
+end_train   = '2012-10-26'#training end date
+
+count=0
+p = range(0, 2)#AR order
+d = range(0, 1)#Difference
+q = range(0, 1)#MA order
+
+variable=[]
+parameters=[]
+max_pvalue=[]
+rsquared=[]
+adjrsquared=[]
+aic=[]
+bic=[]
+rss=[]
+rslts=[]
+
+pdq = list(itertools.product(p, d, q))#arima order pdq combination generation
+seasonal_pdq = [(x[0], x[1], x[2], 24) for x in list(itertools.product(p, d, q))]#arima seasonal order pdq combination generation
+
+for ik in range(1,4):                 # range(1,n) means 1 to n-1 variable combination models are considered
+    for combo in itertools.combinations(X.columns, ik):
+        for numberarima,param in enumerate(pdq):
+            for numberseas,param_seasonal in enumerate(seasonal_pdq):
+                try:
+                    #y.index = pd.DatetimeIndex(y.index.values,freq=y.index.inferred_freq)
+                    X.index = pd.DatetimeIndex(X.index.values,freq='W-FRI')          
+                    results = sm.tsa.statespace.SARIMAX(y.values,
+                                            exog=X[pd.array(combo)],
+                                            order=param,
+                                            seasonal_order=param_seasonal,
+                                            enforce_stationarity=False,
+                                            enforce_invertibility=False).fit()
+                    #results.summary()
+                    #print(results)
+
+                    pred = results.get_prediction(start = pd.to_datetime(start_train),
+                                              end = pd.to_datetime(end_train),
+                                              exog=X[pd.array(combo)][start_train:end_train]
+                                             )
+
+                    y_forecasted = pred.predicted_mean.values
+                    y_truth = y[start_train:].values
+                    RSS = round((((y_forecasted - y_truth) ** 2).sum()),2)
+                    
+                    #RSS=((regr.predict(Xn[pd.array(combo)]) - yn) ** 2).sum()
+                    #pred.predicted_mean[1:].plot(figsize=(12, 8))                
+                               
+                    #print(count,combo,param,param_seasonal,rss,results.aic)
+                    count=count+1
+                    #print(results)
+                    
+                    rslts.append({"model":results, "rss":RSS})        
+                    variable.append(str(results.pvalues.index))
+                    parameters.append(results.params)
+                    max_pvalue.append(round(max(results.pvalues.values),2))
+                    #rsquared.append(round(results.rsquared,2))
+                    #adjrsquared.append(round(results.rsquared_adj,2))
+                    aic.append(round(results.aic,2))
+                    bic.append(round(results.bic,2))
+                    rss.append(RSS)
+                    #print(count,rss)
+                     
+                
+                except:
+                    continue
+                    
+models = pd.DataFrame(rslts)
+variable=pd.DataFrame(variable).rename(columns = {0:'variable'})
+coeff=pd.DataFrame(parameters)
+max_pvalue=pd.DataFrame(max_pvalue).rename(columns = {0:'max_pvalue'})
+#rsquared=pd.DataFrame(rsquared).rename(columns = {0:'rsquared'})
+#adjrsquared=pd.DataFrame(adjrsquared).rename(columns = {0:'adjrsquared'})
+aic=pd.DataFrame(aic).rename(columns = {0:'aic'})
+bic=pd.DataFrame(bic).rename(columns = {0:'bic'})
+rss=pd.DataFrame(rss).rename(columns = {0:'rss'})
+
+variable.join(coeff).join(max_pvalue).join(aic).join(bic).join(rss) 
+#models.loc[176,"model"].summary()
+
+--------------------------------------------------------------------------------------
+
+
